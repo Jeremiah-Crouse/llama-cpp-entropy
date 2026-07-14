@@ -1,0 +1,57 @@
+--- a/src/llama-sampler.cpp
++++ b/src/llama-sampler.cpp
+@@ -1,5 +1,7 @@
+ #include "llama-sampler.h"
+ 
++#include "entropy/entropy_provider.h"
++
+ #include "llama-impl.h"
+ #include "llama-vocab.h"
+ #include "llama-grammar.h"
+@@ -1022,6 +1024,8 @@ struct llama_sampler_dist : public llama_sampler_backend {
+     const uint32_t seed;
+           uint32_t seed_cur;
+ 
+     std::mt19937 rng;
+ 
++    std::unique_ptr<entropy::EntropyProvider> entropy_provider;
++
+     ggml_tensor * inp_uniform;
+ };
+ 
+@@ -1068,10 +1072,9 @@ static void llama_sampler_dist_apply(struct llama_sampler * smpl, llama_token_d
+ #if 1
+     // sample from the obtained probabilities and normalize the probs in a single pass
+     // this is ~3x faster on Mac with full gpt-oss vocab than the version below
+     //
+-    std::uniform_real_distribution<double> dist(0.0f, 1.0f);
+-    const double rnd = dist(ctx->rng);
++    const double rnd = ctx->entropy_provider->uniform01();
+ 
+           double sum_run = 0.0f;
+     const double sum_tgt = sum_cum*rnd;
+@@ -1206,10 +1209,8 @@ static void llama_sampler_dist_backend_set_input(struct llama_sampler * smpl) {
+     // We sample in double precision and cast to float to match rnd numbers of
+     // llama_dampler_dist which uses double precision (sampling from
+     // std::uniform_real_distribution<double> and
+     // std::uniform_real_distribution<float> with same rng will produce
+     // different sequences).
+-    std::uniform_real_distribution<double> dist(0.0f, 1.0f);
+-    const float rnd = dist(sctx->rng);
++    const float rnd = sctx->entropy_provider->uniform01();
+ 
+     ggml_backend_tensor_set(sctx->inp_uniform, &rnd, 0, sizeof(float));
+ }
+@@ -1230,12 +1231,13 @@ struct llama_sampler * llama_sampler_init_dist(uint32_t seed) {
+     auto seed_cur = get_rng_seed(seed);
+     return llama_sampler_init(
+         /* .iface = */ &llama_sampler_dist_i,
+         /* .ctx   = */ new llama_sampler_dist {
+             ("dist"),
+             /* .seed        = */ seed,
+             /* .seed_cur    = */ seed_cur,
+             /* .rng         = */ std::mt19937(seed_cur),
++            /* .entropy_provider = */ entropy::create_provider("philox"),
+             /* .inp_uniform = */ nullptr,
+         });
+ }
