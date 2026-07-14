@@ -6,12 +6,12 @@ echo "Target: aarch64 (Samsung Galaxy A16)"
 echo ""
 
 # Install dependencies
-echo "[1/5] Installing dependencies..."
+echo "[1/6] Installing dependencies..."
 pkg update -y
-pkg install -y cmake clang git curl openssl
+pkg install -y cmake clang git curl openssl python
 
 # Configure
-echo "[2/5] Configuring..."
+echo "[2/6] Configuring..."
 cmake -B build \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER=clang \
@@ -25,11 +25,11 @@ cmake -B build \
   -DCURL_LIBRARY=$(pkg-config --libs-only-L libcurl | sed 's/-L//')/libcurl.so
 
 # Build
-echo "[3/5] Building (this may take 10-20 minutes)..."
+echo "[3/6] Building (this may take 10-20 minutes)..."
 cmake --build build -j$(nproc)
 
 # Verify
-echo "[4/5] Verifying build..."
+echo "[4/6] Verifying build..."
 if [ -f build/bin/llama-cli ]; then
   echo "SUCCESS: llama-cli built"
   ./build/bin/llama-cli --version
@@ -39,7 +39,7 @@ else
 fi
 
 # Setup
-echo "[5/5] Setting up..."
+echo "[5/6] Setting up binaries..."
 mkdir -p ~/llama-entropy
 cp build/bin/llama-cli ~/llama-entropy/
 cp build/bin/llama-server ~/llama-entropy/
@@ -60,11 +60,55 @@ shift 2>/dev/null
 RUNEOF
 chmod +x ~/llama-entropy/run.sh
 
+# Setup Telegram harness
+echo "[6/6] Setting up Telegram harness..."
+pip install requests 2>/dev/null || pip3 install requests 2>/dev/null || true
+cp telegram-harness.py ~/llama-entropy/
+chmod +x ~/llama-entropy/telegram-harness.py
+
+cat > ~/llama-entropy/start-bot.sh << 'BOTEOF'
+#!/bin/bash
+# Start the Telegram bot with local LLM
+# Set your bot token first:
+#   export TELEGRAM_BOT_TOKEN=your_token_here
+
+if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+  echo "Error: Set TELEGRAM_BOT_TOKEN first"
+  echo "  export TELEGRAM_BOT_TOKEN=your_token_here"
+  exit 1
+fi
+
+export LLAMA_URL="http://localhost:8080/v1/chat/completions"
+export LLAMA_MODEL="local"
+export ENTROPY_PROVIDER=qrng
+export ENTROPY_QRNG_ENDPOINT=https://lfdr.de/qrng_api
+
+# Start llama-server in background
+echo "Starting llama-server..."
+~/llama-entropy/llama-server \
+  -m "${1:-$HOME/models/model.gguf}" \
+  -ngl 99 \
+  --host 0.0.0.0 \
+  --port 8080 &
+LLAMA_PID=$!
+sleep 3
+
+echo "Starting Telegram bot..."
+python3 ~/llama-entropy/telegram-harness.py
+
+# Cleanup
+kill $LLAMA_PID 2>/dev/null
+BOTEOF
+chmod +x ~/llama-entropy/start-bot.sh
+
 echo ""
 echo "=== Build Complete ==="
 echo "Binaries: ~/llama-entropy/"
-echo "To run: ~/llama-entropy/run.sh /path/to/model.gguf"
 echo ""
-echo "Or manually:"
-echo "  ENTROPY_PROVIDER=qrng ENTROPY_QRNG_ENDPOINT=https://lfdr.de/qrng_api \\"
-echo "    ~/llama-entropy/llama-cli -m /path/to/model.gguf -ngl 99 --chat"
+echo "Options:"
+echo "  1. Interactive chat: ~/llama-entropy/run.sh /path/to/model.gguf"
+echo "  2. Telegram bot:     ~/llama-entropy/start-bot.sh /path/to/model.gguf"
+echo ""
+echo "For Telegram bot, set your token first:"
+echo "  export TELEGRAM_BOT_TOKEN=your_token_here"
+echo "  ~/llama-entropy/start-bot.sh ~/models/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
