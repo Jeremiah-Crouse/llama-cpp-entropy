@@ -36,7 +36,8 @@ SYSTEM_PROMPT = os.environ.get(
     "Be concise and helpful.",
 )
 MAX_HISTORY = int(os.environ.get("MAX_HISTORY", "20"))
-STATE_FILE = Path(os.environ.get("STATE_FILE", "/tmp/telegram_harness_offset.json"))
+HOME_DIR = Path(os.path.expanduser("~"))
+STATE_FILE = HOME_DIR / ".bot_offset.json"
 
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
